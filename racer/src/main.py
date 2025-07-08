@@ -325,7 +325,7 @@ class MainMenuWidget(BaseMenuWidget):
 
     def __init__(self):
         super().__init__();
-        title = QLabel("2D Traffic Racer")
+        title = QLabel("RACER")
         start_button, settings_button = QPushButton("Начать игру"), QPushButton("Настройки")
         highscores_button, exit_button = QPushButton("Рекорды"), QPushButton("Выход")
         start_button.clicked.connect(self.showLevelSelect.emit);
