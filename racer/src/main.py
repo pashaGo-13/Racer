@@ -1,18 +1,21 @@
 import sys
 import random
+import json
+from pathlib import Path
 from PyQt6.QtGui import QPainter, QColor, QFont, QImage, QPainterPath
 from PyQt6.QtCore import Qt, QTimer, QRectF, QPointF, QElapsedTimer, QUrl
-from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6.QtWidgets import QApplication, QWidget, QInputDialog, QLineEdit
 from PyQt6.QtMultimedia import QSoundEffect
 
 # --- Константы игры ---
 SCREEN_WIDTH = 600
 SCREEN_HEIGHT = 600
 PLAYER_SPEED_INCREMENT = 0.5
-MAX_PLAYER_SPEED = 10
-TRAFFIC_CAR_SPEED_MIN = 3
-TRAFFIC_CAR_SPEED_MAX = 7
-NUM_LANES = 3
+MAX_PLAYER_SPEED = 30
+TRAFFIC_CAR_SPEED_MIN = 10
+TRAFFIC_CAR_SPEED_MAX = 25
+NUM_LANES = 4
+HIGHSCORES_FILE = "highscores.json"
 
 # --- Состояния игры ---
 class GameState:
@@ -24,6 +27,7 @@ class GameState:
     DIFFICULTY_SETTINGS = 5
     GRAPHICS_SETTINGS = 6
     CONTROLS_SETTINGS = 7
+    HIGHSCORES = 8
 
 # --- Класс игрового автомобиля ---
 class PlayerCar:
@@ -94,6 +98,9 @@ class GameWidget(QWidget):
         
         # Загрузка ресурсов
         self.load_resources()
+        
+        # Загрузка таблицы рекордов
+        self.highscores = self.load_highscores()
 
     def init_game(self):
         """Инициализация игровых переменных"""
@@ -164,6 +171,51 @@ class GameWidget(QWidget):
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation
             )
+
+    def load_highscores(self):
+        """Загрузка таблицы рекордов из файла"""
+        try:
+            if Path(HIGHSCORES_FILE).exists():
+                with open(HIGHSCORES_FILE, 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            print(f"Ошибка загрузки таблицы рекордов: {e}")
+        
+        # Возвращаем таблицу по умолчанию, если файл не существует или произошла ошибка
+        return [
+            {"name": "Player1", "score": 1000},
+            {"name": "Player2", "score": 800},
+            {"name": "Player3", "score": 600},
+            {"name": "Player4", "score": 400},
+            {"name": "Player5", "score": 200},
+            {"name": "Player6", "score": 100},
+            {"name": "Player7", "score": 90},
+            {"name": "Player8", "score": 80},
+            {"name": "Player9", "score": 70},
+            {"name": "Player10", "score": 60}
+        ]
+
+    def save_highscores(self):
+        """Сохранение таблицы рекордов в файл"""
+        try:
+            with open(HIGHSCORES_FILE, 'w') as f:
+                json.dump(self.highscores, f, indent=2)
+        except Exception as e:
+            print(f"Ошибка сохранения таблицы рекордов: {e}")
+
+    def check_highscore(self, score):
+        """Проверка, является ли результат рекордом"""
+        if len(self.highscores) < 10:
+            return True
+        return score > self.highscores[-1]["score"]
+
+    def add_highscore(self, name, score):
+        """Добавление нового рекорда в таблицу"""
+        self.highscores.append({"name": name, "score": score})
+        # Сортируем по убыванию очков и оставляем только топ-10
+        self.highscores.sort(key=lambda x: x["score"], reverse=True)
+        self.highscores = self.highscores[:10]
+        self.save_highscores()
 
     # --- Основной игровой цикл ---
     def game_loop(self):
@@ -281,6 +333,30 @@ class GameWidget(QWidget):
         """Обработка окончания игры"""
         self.game_state = GameState.GAME_OVER
         self.spawn_traffic_timer.stop()
+    
+        # Проверяем, является ли результат рекордом
+        if self.check_highscore(self.score):
+        # Используем QTimer.singleShot чтобы дать время окну обновиться
+            QTimer.singleShot(100, self.show_highscore_dialog)
+
+    def show_highscore_dialog(self):
+        """Показывает диалог для ввода имени при новом рекорде"""
+        dialog = QInputDialog(self)
+        dialog.setWindowTitle('Новый рекорд!')
+        dialog.setLabelText(f'Ваш результат: {self.score}\nВведите ваше имя:')
+        dialog.setTextValue('')  # Начальное значение текста
+        dialog.setInputMode(QInputDialog.InputMode.TextInput)
+        
+        # Получаем доступ к QLineEdit и устанавливаем максимальную длину
+        line_edit = dialog.findChild(QLineEdit)
+        if line_edit:
+            line_edit.setMaxLength(15)
+        
+        ok = dialog.exec()
+        name = dialog.textValue()
+        
+        if ok and name:
+            self.add_highscore(name, self.score)
 
     def start_new_game(self):
         """Начало новой игры"""
@@ -329,6 +405,8 @@ class GameWidget(QWidget):
             
             if self.game_state == GameState.GAME_OVER:
                 self.draw_game_over(painter)
+        elif self.game_state == GameState.HIGHSCORES:
+            self.draw_highscores(painter)
 
     def draw_game(self, painter):
         """Отрисовка игрового экрана"""
@@ -352,15 +430,45 @@ class GameWidget(QWidget):
 
     def draw_game_over(self, painter):
         """Отрисовка экрана окончания игры"""
+        # Полупрозрачный фон
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 180))
+        
         painter.setFont(QFont("Arial", 48, QFont.Weight.Bold))
         painter.setPen(Qt.GlobalColor.red)
         painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "ИГРА ОКОНЧЕНА")
         
         painter.setFont(QFont("Arial", 24))
         painter.setPen(Qt.GlobalColor.white)
+        painter.drawText(QRectF(0, SCREEN_HEIGHT // 2, SCREEN_WIDTH, 40),
+                        Qt.AlignmentFlag.AlignHCenter,
+                        f"Ваш счет: {self.score}")
+        
+        painter.setFont(QFont("Arial", 18))
         painter.drawText(self.rect(), 
                         Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignBottom, 
                         "Нажмите 'R' для перезапуска или 'M' для меню")
+
+    def draw_highscores(self, painter):
+        """Отрисовка таблицы рекордов"""
+        self.draw_common_background(painter, "ТАБЛИЦА РЕКОРДОВ")
+        
+        painter.setFont(QFont("Arial", 20, QFont.Weight.Bold))
+        painter.setPen(QColor(220, 220, 220))
+        
+        # Заголовки столбцов
+        painter.drawText(150, 180, "Игрок")
+        painter.drawText(400, 180, "Очки")
+        
+        painter.setFont(QFont("Arial", 16))
+        
+        # Вывод топ-10 рекордов
+        for i, record in enumerate(self.highscores[:10]):
+            y_pos = 220 + i * 35
+            painter.drawText(150, y_pos, f"{i+1}. {record['name']}")
+            painter.drawText(400, y_pos, str(record['score']))
+        
+        self.draw_back_button(painter)
+        self.draw_footer(painter)
 
     # --- Унифицированные методы отрисовки меню ---
     def draw_common_background(self, painter, title):
@@ -425,6 +533,7 @@ class GameWidget(QWidget):
         self.draw_common_background(painter, "Traffic Racer Qt6")
         buttons = [
             ("Новая игра", GameState.PLAYING),
+            ("Таблица рекордов", GameState.HIGHSCORES),
             ("Настройки", GameState.SETTINGS),
             ("Выход", None)
         ]
@@ -535,7 +644,7 @@ class GameWidget(QWidget):
                 
         elif self.game_state in (GameState.SETTINGS, GameState.AUDIO_SETTINGS, 
                                GameState.DIFFICULTY_SETTINGS, GameState.GRAPHICS_SETTINGS,
-                               GameState.CONTROLS_SETTINGS):
+                               GameState.CONTROLS_SETTINGS, GameState.HIGHSCORES):
             if event.key() in (Qt.Key.Key_M, Qt.Key.Key_Escape):
                 self.game_state = GameState.MENU
 
@@ -568,25 +677,32 @@ class GameWidget(QWidget):
                 self.handle_graphics_settings_click(pos)
             elif self.game_state == GameState.CONTROLS_SETTINGS:
                 self.handle_controls_settings_click(pos)
+            elif self.game_state == GameState.HIGHSCORES:
+                self.handle_highscores_click(pos)
 
     def handle_menu_click(self, pos):
         """Обработка кликов в главном меню"""
         button_width = 220
         button_height = 45
         spacing = 15
-        start_y = SCREEN_HEIGHT // 2 - (3 * (button_height + spacing) - spacing) // 2
+        start_y = SCREEN_HEIGHT // 2 - (4 * (button_height + spacing) - spacing) // 2
         
         new_game_rect = QRectF(SCREEN_WIDTH // 2 - button_width // 2, start_y, 
                               button_width, button_height)
+        highscores_rect = QRectF(SCREEN_WIDTH // 2 - button_width // 2, 
+                                start_y + button_height + spacing, 
+                                button_width, button_height)
         settings_rect = QRectF(SCREEN_WIDTH // 2 - button_width // 2, 
-                              start_y + button_height + spacing, 
+                              start_y + 2 * (button_height + spacing), 
                               button_width, button_height)
         exit_rect = QRectF(SCREEN_WIDTH // 2 - button_width // 2, 
-                          start_y + 2 * (button_height + spacing), 
+                          start_y + 3 * (button_height + spacing), 
                           button_width, button_height)
         
         if new_game_rect.contains(pos):
             self.start_new_game()
+        elif highscores_rect.contains(pos):
+            self.game_state = GameState.HIGHSCORES
         elif settings_rect.contains(pos):
             self.game_state = GameState.SETTINGS
         elif exit_rect.contains(pos):
@@ -672,6 +788,11 @@ class GameWidget(QWidget):
                 
         if QRectF(20, SCREEN_HEIGHT - 70, 150, 45).contains(pos):
             self.game_state = GameState.SETTINGS
+
+    def handle_highscores_click(self, pos):
+        """Обработка кликов в таблице рекордов"""
+        if QRectF(20, SCREEN_HEIGHT - 70, 150, 45).contains(pos):
+            self.game_state = GameState.MENU
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
