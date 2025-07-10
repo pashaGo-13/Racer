@@ -5,19 +5,19 @@ from pathlib import Path
 from PyQt6.QtGui import QPainter, QColor, QFont, QImage, QPainterPath
 from PyQt6.QtCore import Qt, QTimer, QRectF, QPointF, QElapsedTimer, QUrl
 from PyQt6.QtWidgets import QApplication, QWidget, QInputDialog, QLineEdit
-from PyQt6.QtMultimedia import QSoundEffect
+from PyQt6.QtMultimedia import QSoundEffect, QMediaPlayer, QAudioOutput
 
-# --- Константы игры ---
+# Константы игры
 SCREEN_WIDTH = 600
 SCREEN_HEIGHT = 600
-PLAYER_SPEED_INCREMENT = 0.5
-MAX_PLAYER_SPEED = 30
-TRAFFIC_CAR_SPEED_MIN = 10
-TRAFFIC_CAR_SPEED_MAX = 25
+PLAYER_SPEED_INCREMENT = 0.1
+MAX_PLAYER_SPEED = 25.6
+TRAFFIC_CAR_SPEED_MIN = 5
+TRAFFIC_CAR_SPEED_MAX = 20
 NUM_LANES = 4
 HIGHSCORES_FILE = "highscores.json"
 
-# --- Состояния игры ---
+# Состояния игры
 class GameState:
     MENU = 0
     PLAYING = 1
@@ -29,7 +29,6 @@ class GameState:
     CONTROLS_SETTINGS = 7
     HIGHSCORES = 8
 
-# --- Класс игрового автомобиля ---
 class PlayerCar:
     def __init__(self):
         self.width = 60
@@ -50,7 +49,6 @@ class PlayerCar:
                                       Qt.TransformationMode.SmoothTransformation)
         painter.drawImage(int(self.x), int(self.y), scaled_image)
 
-# --- Класс встречного автомобиля ---
 class TrafficCar:
     def __init__(self, x, y, base_speed, car_type):
         self.width = 60
@@ -59,7 +57,6 @@ class TrafficCar:
         self.y = y
         self.base_speed = base_speed
         
-        # Выбираем случайное изображение машины
         car_images = [
             "src/assets/images/enemy_car_1.png",
             "src/assets/images/enemy_car_2.png",
@@ -83,40 +80,26 @@ class TrafficCar:
                                       Qt.TransformationMode.SmoothTransformation)
         painter.drawImage(int(self.x), int(self.y), scaled_image)
 
-# --- Основной класс игры ---
 class GameWidget(QWidget):
     def __init__(self):
         super().__init__()
         self.setFixedSize(SCREEN_WIDTH, SCREEN_HEIGHT)
         self.setWindowTitle("Traffic Racer Qt6")
-        
-        # Инициализация игровых параметров
         self.init_game()
-        
-        # Настройка таймеров
         self.setup_timers()
-        
-        # Загрузка ресурсов
         self.load_resources()
-        
-        # Загрузка таблицы рекордов
         self.highscores = self.load_highscores()
 
     def init_game(self):
-        """Инициализация игровых переменных"""
         self.game_state = GameState.MENU
         self.score = 0
         self.player_car = PlayerCar()
         self.traffic_cars = []
-        
-        # Настройки по умолчанию
         self.music_volume = 50
         self.sound_volume = 70
         self.difficulty = 1
         self.graphics_quality = 2
         self.auto_acceleration = True
-        
-        # Состояния клавиш
         self.left_pressed = False
         self.right_pressed = False
         self.up_pressed = False
@@ -124,20 +107,16 @@ class GameWidget(QWidget):
         self.space_pressed = False
 
     def setup_timers(self):
-        """Настройка игровых таймеров"""
         self.game_timer = QTimer(self)
         self.game_timer.timeout.connect(self.game_loop)
-        self.game_timer.start(16)  # ~60 FPS
-        
+        self.game_timer.start(16)
         self.elapsed_timer = QElapsedTimer()
         self.elapsed_timer.start()
-        
         self.spawn_traffic_timer = QTimer(self)
         self.spawn_traffic_timer.timeout.connect(self.spawn_traffic_car)
-        self.spawn_traffic_timer_interval = 2000  # 2 секунды
+        self.spawn_traffic_timer_interval = 2000
 
     def load_resources(self):
-        """Загрузка звуков и изображений"""
         # Звуковые эффекты
         self.sound_effects = {
             'gas': QSoundEffect(),
@@ -158,6 +137,14 @@ class GameWidget(QWidget):
         
         self.update_sound_volumes()
         
+        # Фоновая музыка
+        self.background_music = QMediaPlayer()
+        self.audio_output = QAudioOutput()
+        self.background_music.setAudioOutput(self.audio_output)
+        music_path = "C:/reposit/Racer/racer/src/assets/sounds/music.mp3"
+        self.background_music.setSource(QUrl.fromLocalFile(music_path))
+        self.audio_output.setVolume(self.music_volume / 100.0)
+        
         # Дорожное полотно
         self.road_offset = 0
         self.road_speed_multiplier = 5
@@ -173,7 +160,6 @@ class GameWidget(QWidget):
             )
 
     def load_highscores(self):
-        """Загрузка таблицы рекордов из файла"""
         try:
             if Path(HIGHSCORES_FILE).exists():
                 with open(HIGHSCORES_FILE, 'r') as f:
@@ -181,7 +167,6 @@ class GameWidget(QWidget):
         except Exception as e:
             print(f"Ошибка загрузки таблицы рекордов: {e}")
         
-        # Возвращаем таблицу по умолчанию, если файл не существует или произошла ошибка
         return [
             {"name": "Player1", "score": 1000},
             {"name": "Player2", "score": 800},
@@ -196,7 +181,6 @@ class GameWidget(QWidget):
         ]
 
     def save_highscores(self):
-        """Сохранение таблицы рекордов в файл"""
         try:
             with open(HIGHSCORES_FILE, 'w') as f:
                 json.dump(self.highscores, f, indent=2)
@@ -204,36 +188,28 @@ class GameWidget(QWidget):
             print(f"Ошибка сохранения таблицы рекордов: {e}")
 
     def check_highscore(self, score):
-        """Проверка, является ли результат рекордом"""
         if len(self.highscores) < 10:
             return True
         return score > self.highscores[-1]["score"]
 
     def add_highscore(self, name, score):
-        """Добавление нового рекорда в таблицу"""
         self.highscores.append({"name": name, "score": score})
-        # Сортируем по убыванию очков и оставляем только топ-10
         self.highscores.sort(key=lambda x: x["score"], reverse=True)
         self.highscores = self.highscores[:10]
         self.save_highscores()
 
-    # --- Основной игровой цикл ---
     def game_loop(self):
         delta_time = self.elapsed_timer.restart() / 1000.0
-        
         if self.game_state == GameState.PLAYING:
             self.update_game_state(delta_time)
-        
         self.update()
 
     def update_game_state(self, dt):
-        """Обновление игрового состояния"""
         self.update_player_position(dt)
         self.update_traffic(dt)
         self.update_road_animation()
 
     def update_player_position(self, dt):
-        """Обновление позиции игрока"""
         if self.left_pressed:
             self.player_car.x = max(0, self.player_car.x - 300 * dt)
         if self.right_pressed:
@@ -251,11 +227,9 @@ class GameWidget(QWidget):
             self.player_car.speed = min(MAX_PLAYER_SPEED, 
                                       self.player_car.speed + PLAYER_SPEED_INCREMENT * dt * 30)
         
-        # Обработка звуков
         self.handle_sound_effects()
 
     def handle_sound_effects(self):
-        """Управление звуковыми эффектами"""
         if self.up_pressed and not self.auto_acceleration and not self.sound_effects['gas'].isPlaying():
             self.play_sound('gas')
         elif not self.up_pressed and self.sound_effects['gas'].isPlaying():
@@ -272,7 +246,6 @@ class GameWidget(QWidget):
             self.sound_effects['honk'].stop()
 
     def update_traffic(self, dt):
-        """Обновление трафика и проверка столкновений"""
         cars_to_remove = []
         
         for car in self.traffic_cars:
@@ -284,13 +257,12 @@ class GameWidget(QWidget):
                 
             if self.player_car.get_rect().intersects(car.get_rect()):
                 self.play_sound('crash')
-                self.game_over()
+                self.handle_game_over()
                 
         for car in cars_to_remove:
             self.traffic_cars.remove(car)
 
     def update_road_animation(self):
-        """Анимация дорожного полотна"""
         if self.scaled_road_image and not self.scaled_road_image.isNull():
             self.road_offset += (self.road_speed_multiplier + self.player_car.speed) * 0.06
             self.road_offset %= SCREEN_HEIGHT
@@ -303,51 +275,99 @@ class GameWidget(QWidget):
         lane_center = (SCREEN_WIDTH / NUM_LANES) * (lane_index + 0.5)
         x_pos = lane_center - 25
     
-        # Выбираем случайный тип машины (0, 1 или 2)
         car_type = random.randint(0, 2)
-    
-        # Базовая скорость в зависимости от сложности
         base_speed = self.get_traffic_speed()
-    
-        # Модификатор скорости в зависимости от типа машины
-        speed_modifiers = [0.9, 1.0, 1.1]  # Медленные, нормальные, быстрые
+        speed_modifiers = [0.9, 1.0, 1.1]
         speed = base_speed * speed_modifiers[car_type]
     
-        # Проверка на перекрытие с другими машинами
         if not any(abs(car.x - x_pos) < 50 and car.y < 150 for car in self.traffic_cars):
             self.traffic_cars.append(TrafficCar(x_pos, -80, speed, car_type))
 
     def get_traffic_speed(self):
-        """Возвращает базовую скорость в зависимости от сложности"""
         base_min = TRAFFIC_CAR_SPEED_MIN
         base_max = TRAFFIC_CAR_SPEED_MAX
     
-        if self.difficulty == 0:  # Легкий
+        if self.difficulty == 0:
             return random.uniform(base_min, base_min + (base_max - base_min) * 0.5)
-        elif self.difficulty == 1:  # Средний
+        elif self.difficulty == 1:
             return random.uniform(base_min, base_max)
-        else:  # Сложный
+        else:
             return random.uniform(base_min + (base_max - base_min) * 0.5, base_max + 2)
 
-    def game_over(self):
+    def handle_game_over(self):
         """Обработка окончания игры"""
         self.game_state = GameState.GAME_OVER
         self.spawn_traffic_timer.stop()
+        self.background_music.stop()  # Останавливаем музыку при окончании игры
     
-        # Проверяем, является ли результат рекордом
         if self.check_highscore(self.score):
-        # Используем QTimer.singleShot чтобы дать время окну обновиться
             QTimer.singleShot(100, self.show_highscore_dialog)
 
+    def draw_game_over(self, painter):
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 180))
+        
+        painter.setFont(QFont("Arial", 36, QFont.Weight.Bold))
+        painter.setPen(Qt.GlobalColor.red)
+        painter.drawText(QRectF(0, 150, SCREEN_WIDTH, 60),
+                        Qt.AlignmentFlag.AlignCenter,
+                        "АВАРИЯ!")
+        
+        painter.setFont(QFont("Arial", 24))
+        painter.setPen(Qt.GlobalColor.white)
+        painter.drawText(QRectF(0, 220, SCREEN_WIDTH, 40),
+                        Qt.AlignmentFlag.AlignCenter,
+                        f"Ваш счет: {self.score}")
+
+        button_width = 200
+        button_height = 50
+        button_y = SCREEN_HEIGHT // 2 + 50
+        
+        restart_rect = QRectF(
+            SCREEN_WIDTH // 2 - button_width - 10, 
+            button_y, 
+            button_width, 
+            button_height
+        )
+        self.draw_button(painter, restart_rect, "Играть снова")
+        
+        menu_rect = QRectF(
+            SCREEN_WIDTH // 2 + 10, 
+            button_y, 
+            button_width, 
+            button_height
+        )
+        self.draw_button(painter, menu_rect, "Главное меню")
+
+    def handle_game_over_click(self, pos):
+        button_width = 200
+        button_height = 50
+        button_y = SCREEN_HEIGHT // 2 + 50
+        
+        restart_rect = QRectF(
+            SCREEN_WIDTH // 2 - button_width - 10, 
+            button_y, 
+            button_width, 
+            button_height
+        )
+        if restart_rect.contains(pos):
+            self.start_new_game()
+        
+        menu_rect = QRectF(
+            SCREEN_WIDTH // 2 + 10, 
+            button_y, 
+            button_width, 
+            button_height
+        )
+        if menu_rect.contains(pos):
+            self.game_state = GameState.MENU
+
     def show_highscore_dialog(self):
-        """Показывает диалог для ввода имени при новом рекорде"""
         dialog = QInputDialog(self)
         dialog.setWindowTitle('Новый рекорд!')
         dialog.setLabelText(f'Ваш результат: {self.score}\nВведите ваше имя:')
-        dialog.setTextValue('')  # Начальное значение текста
+        dialog.setTextValue('')
         dialog.setInputMode(QInputDialog.InputMode.TextInput)
         
-        # Получаем доступ к QLineEdit и устанавливаем максимальную длину
         line_edit = dialog.findChild(QLineEdit)
         if line_edit:
             line_edit.setMaxLength(15)
@@ -363,27 +383,29 @@ class GameWidget(QWidget):
         self.game_state = GameState.PLAYING
         self.reset_game()
         self.spawn_traffic_timer.start(self.spawn_traffic_timer_interval)
+        # Воспроизведение фоновой музыки в цикле
+        self.background_music.setLoops(QMediaPlayer.Loops.Infinite)
+        self.background_music.play()
 
     def reset_game(self):
-        """Сброс игровых параметров"""
         self.score = 0
         self.player_car = PlayerCar()
         self.traffic_cars = []
         self.road_offset = 0
         self.elapsed_timer.restart()
 
-    # --- Методы работы со звуком ---
     def update_sound_volumes(self):
-        """Обновление громкости звуков"""
+        """Обновление громкости звуков и музыки"""
         for sound in self.sound_effects.values():
             sound.setVolume(self.sound_volume / 100.0)
+        
+        if hasattr(self, 'audio_output'):
+            self.audio_output.setVolume(self.music_volume / 100.0)
 
     def play_sound(self, sound_name):
-        """Воспроизведение звука"""
         if sound_name in self.sound_effects:
             self.sound_effects[sound_name].play()
 
-    # --- Методы отрисовки ---
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -409,85 +431,52 @@ class GameWidget(QWidget):
             self.draw_highscores(painter)
 
     def draw_game(self, painter):
-        """Отрисовка игрового экрана"""
-        # Дорожное полотно
         if self.scaled_road_image:
             painter.drawImage(0, int(self.road_offset), self.scaled_road_image)
             painter.drawImage(0, int(self.road_offset - SCREEN_HEIGHT), self.scaled_road_image)
         else:
             painter.fillRect(self.rect(), QColor(50, 50, 50))
         
-        # Машины
         self.player_car.draw(painter)
         for car in self.traffic_cars:
             car.draw(painter)
         
-        # Интерфейс
         painter.setFont(QFont("Arial", 16))
         painter.setPen(Qt.GlobalColor.white)
         painter.drawText(10, 30, f"Счет: {self.score}")
         painter.drawText(10, 60, f"Скорость: {int(self.player_car.speed * 10)} км/ч")
 
-    def draw_game_over(self, painter):
-        """Отрисовка экрана окончания игры"""
-        # Полупрозрачный фон
-        painter.fillRect(self.rect(), QColor(0, 0, 0, 180))
-        
-        painter.setFont(QFont("Arial", 48, QFont.Weight.Bold))
-        painter.setPen(Qt.GlobalColor.red)
-        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "ИГРА ОКОНЧЕНА")
-        
-        painter.setFont(QFont("Arial", 24))
-        painter.setPen(Qt.GlobalColor.white)
-        painter.drawText(QRectF(0, SCREEN_HEIGHT // 2, SCREEN_WIDTH, 40),
-                        Qt.AlignmentFlag.AlignHCenter,
-                        f"Ваш счет: {self.score}")
-        
-        painter.setFont(QFont("Arial", 18))
-        painter.drawText(self.rect(), 
-                        Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignBottom, 
-                        "Нажмите 'R' для перезапуска или 'M' для меню")
-
     def draw_highscores(self, painter):
-        """Отрисовка таблицы рекордов"""
         self.draw_common_background(painter, "ТАБЛИЦА РЕКОРДОВ")
         
         painter.setFont(QFont("Arial", 20, QFont.Weight.Bold))
         painter.setPen(QColor(220, 220, 220))
         
-        # Заголовки столбцов
         painter.drawText(150, 180, "Игрок")
         painter.drawText(400, 180, "Очки")
         
         painter.setFont(QFont("Arial", 16))
         
-        # Вывод топ-10 рекордов
         for i, record in enumerate(self.highscores[:10]):
             y_pos = 220 + i * 35
             painter.drawText(150, y_pos, f"{i+1}. {record['name']}")
             painter.drawText(400, y_pos, str(record['score']))
         
         self.draw_back_button(painter)
-        self.draw_footer(painter)
 
-    # --- Унифицированные методы отрисовки меню ---
     def draw_common_background(self, painter, title):
-        """Общий фон для всех меню"""
         painter.fillRect(self.rect(), QColor(35, 35, 40))
         
-        # Заголовок
         painter.setFont(QFont("Arial", 28, QFont.Weight.Bold))
         painter.setPen(QColor(220, 220, 220))
         painter.drawText(QRectF(0, 80, SCREEN_WIDTH, 60),
                         Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
                         title)
         
-        # Декоративная линия
         painter.setPen(QColor(70, 130, 180, 150))
         painter.drawLine(SCREEN_WIDTH // 4, 140, 3 * SCREEN_WIDTH // 4, 140)
 
     def draw_button(self, painter, rect, text, color=None):
-        """Отрисовка кнопки"""
         button_color = color if color else QColor(70, 130, 180)
         path = QPainterPath()
         path.addRoundedRect(rect, 8, 8)
@@ -499,7 +488,6 @@ class GameWidget(QWidget):
         return rect
 
     def draw_button_block(self, painter, buttons, start_y=None):
-        """Отрисовка блока кнопок"""
         button_width = 220
         button_height = 45
         spacing = 15
@@ -517,19 +505,10 @@ class GameWidget(QWidget):
         return button_rects
 
     def draw_back_button(self, painter):
-        """Кнопка 'Назад'"""
-        back_rect = QRectF(20, SCREEN_HEIGHT - 70, 150, 45)
+        back_rect = QRectF(20, SCREEN_HEIGHT - 60, 100, 35)
         return self.draw_button(painter, back_rect, "Назад", QColor(100, 100, 100))
 
-    def draw_footer(self, painter):
-        """Нижний колонтитул"""
-        painter.setFont(QFont("Arial", 9))
-        painter.setPen(QColor(150, 150, 150))
-        painter.drawText(10, SCREEN_HEIGHT - 15, "v1.0")
-
-    # --- Конкретные меню ---
     def draw_menu(self, painter):
-        """Главное меню"""
         self.draw_common_background(painter, "Traffic Racer Qt6")
         buttons = [
             ("Новая игра", GameState.PLAYING),
@@ -538,10 +517,8 @@ class GameWidget(QWidget):
             ("Выход", None)
         ]
         self.draw_button_block(painter, buttons)
-        self.draw_footer(painter)
 
     def draw_settings_menu(self, painter):
-        """Меню настроек"""
         self.draw_common_background(painter, "НАСТРОЙКИ")
         buttons = [
             ("Аудио", GameState.AUDIO_SETTINGS),
@@ -551,27 +528,21 @@ class GameWidget(QWidget):
         ]
         self.draw_button_block(painter, buttons)
         self.draw_back_button(painter)
-        self.draw_footer(painter)
 
     def draw_audio_settings(self, painter):
-        """Настройки аудио"""
         self.draw_common_background(painter, "НАСТРОЙКИ АУДИО")
         
-        # Громкость музыки
         painter.setFont(QFont("Arial", 16))
         painter.setPen(Qt.GlobalColor.white)
         painter.drawText(50, 150, "Громкость музыки:")
         self.draw_slider(painter, 50, 180, self.music_volume, QColor(0, 150, 0))
         
-        # Громкость звуков
         painter.drawText(50, 250, "Громкость звуков:")
         self.draw_slider(painter, 50, 280, self.sound_volume, QColor(0, 0, 150))
         
         self.draw_back_button(painter)
-        self.draw_footer(painter)
 
     def draw_difficulty_settings(self, painter):
-        """Настройки сложности"""
         self.draw_common_background(painter, "УРОВЕНЬ СЛОЖНОСТИ")
         
         difficulties = ["Легкий", "Средний", "Сложный"]
@@ -581,10 +552,8 @@ class GameWidget(QWidget):
             self.draw_button(painter, rect, diff, color)
         
         self.draw_back_button(painter)
-        self.draw_footer(painter)
 
     def draw_graphics_settings(self, painter):
-        """Настройки графики"""
         self.draw_common_background(painter, "КАЧЕСТВО ГРАФИКИ")
         
         qualities = ["Низкое", "Среднее", "Высокое"]
@@ -594,10 +563,8 @@ class GameWidget(QWidget):
             self.draw_button(painter, rect, qual, color)
         
         self.draw_back_button(painter)
-        self.draw_footer(painter)
 
     def draw_controls_settings(self, painter):
-        """Настройки управления"""
         self.draw_common_background(painter, "НАСТРОЙКИ УПРАВЛЕНИЯ")
         
         options = ["Автоускорение", "Ручное управление"]
@@ -608,21 +575,16 @@ class GameWidget(QWidget):
             self.draw_button(painter, rect, opt, color)
         
         self.draw_back_button(painter)
-        self.draw_footer(painter)
 
     def draw_slider(self, painter, x, y, value, color):
-        """Отрисовка ползунка с исправлением типов"""
         width = SCREEN_WIDTH - 100
         height = 20
     
-        # Фон ползунка
         painter.fillRect(QRectF(x, y, width, height), QColor(100, 100, 100))
     
-        # Заполненная часть (преобразуем value в int)
         filled_width = int(width * (value / 100))
         painter.fillRect(QRectF(x, y, filled_width, height), color)
 
-    # --- Обработка ввода ---
     def keyPressEvent(self, event):
         if self.game_state == GameState.PLAYING:
             if event.key() == Qt.Key.Key_Left:
@@ -640,12 +602,14 @@ class GameWidget(QWidget):
             if event.key() == Qt.Key.Key_R:
                 self.start_new_game()
             elif event.key() == Qt.Key.Key_M:
+                self.background_music.stop()  # Останавливаем музыку при возврате в меню
                 self.game_state = GameState.MENU
                 
         elif self.game_state in (GameState.SETTINGS, GameState.AUDIO_SETTINGS, 
                                GameState.DIFFICULTY_SETTINGS, GameState.GRAPHICS_SETTINGS,
                                GameState.CONTROLS_SETTINGS, GameState.HIGHSCORES):
             if event.key() in (Qt.Key.Key_M, Qt.Key.Key_Escape):
+                self.background_music.stop()  # Останавливаем музыку при возврате в меню
                 self.game_state = GameState.MENU
 
     def keyReleaseEvent(self, event):
@@ -665,7 +629,9 @@ class GameWidget(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             pos = QPointF(event.pos())
             
-            if self.game_state == GameState.MENU:
+            if self.game_state == GameState.GAME_OVER:
+                self.handle_game_over_click(pos)
+            elif self.game_state == GameState.MENU:
                 self.handle_menu_click(pos)
             elif self.game_state == GameState.SETTINGS:
                 self.handle_settings_click(pos)
@@ -681,7 +647,6 @@ class GameWidget(QWidget):
                 self.handle_highscores_click(pos)
 
     def handle_menu_click(self, pos):
-        """Обработка кликов в главном меню"""
         button_width = 220
         button_height = 45
         spacing = 15
@@ -709,7 +674,6 @@ class GameWidget(QWidget):
             QApplication.instance().quit()
 
     def handle_settings_click(self, pos):
-        """Обработка кликов в меню настроек"""
         button_width = 220
         button_height = 45
         spacing = 15
@@ -740,24 +704,19 @@ class GameWidget(QWidget):
             self.game_state = GameState.MENU
 
     def handle_audio_settings_click(self, pos):
-        """Обработка кликов в настройках аудио"""
-        # Ползунок музыки
         if 50 <= pos.x() <= SCREEN_WIDTH - 50 and 180 <= pos.y() <= 200:
             self.music_volume = int((pos.x() - 50) / (SCREEN_WIDTH - 100) * 100)
             self.music_volume = max(0, min(100, self.music_volume))
             
-        # Ползунок звуков
         elif 50 <= pos.x() <= SCREEN_WIDTH - 50 and 280 <= pos.y() <= 300:
             self.sound_volume = int((pos.x() - 50) / (SCREEN_WIDTH - 100) * 100)
             self.sound_volume = max(0, min(100, self.sound_volume))
             self.update_sound_volumes()
             
-        # Кнопка Назад
         elif QRectF(20, SCREEN_HEIGHT - 70, 150, 45).contains(pos):
             self.game_state = GameState.SETTINGS
 
     def handle_difficulty_settings_click(self, pos):
-        """Обработка кликов в настройках сложности"""
         for i in range(3):
             rect = QRectF(SCREEN_WIDTH // 2 - 100, 150 + i * 80, 200, 60)
             if rect.contains(pos):
@@ -768,7 +727,6 @@ class GameWidget(QWidget):
             self.game_state = GameState.SETTINGS
 
     def handle_graphics_settings_click(self, pos):
-        """Обработка кликов в настройках графики"""
         for i in range(3):
             rect = QRectF(SCREEN_WIDTH // 2 - 100, 150 + i * 80, 200, 60)
             if rect.contains(pos):
@@ -779,7 +737,6 @@ class GameWidget(QWidget):
             self.game_state = GameState.SETTINGS
 
     def handle_controls_settings_click(self, pos):
-        """Обработка кликов в настройках управления"""
         for i in range(2):
             rect = QRectF(SCREEN_WIDTH // 2 - 125, 150 + i * 80, 250, 60)
             if rect.contains(pos):
@@ -790,7 +747,6 @@ class GameWidget(QWidget):
             self.game_state = GameState.SETTINGS
 
     def handle_highscores_click(self, pos):
-        """Обработка кликов в таблице рекордов"""
         if QRectF(20, SCREEN_HEIGHT - 70, 150, 45).contains(pos):
             self.game_state = GameState.MENU
 
