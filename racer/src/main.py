@@ -2,8 +2,9 @@ import sys
 import random
 import json
 from pathlib import Path
-from PyQt6.QtGui import QPainter, QColor, QFont, QImage, QPainterPath
-from PyQt6.QtCore import Qt, QTimer, QRectF, QPointF, QElapsedTimer, QUrl
+from PyQt6.QtGui import (QPainter, QColor, QFont, QImage, QPainterPath, 
+                         QPen, QLinearGradient, QConicalGradient, QCursor)
+from PyQt6.QtCore import Qt, QTimer, QRectF, QPointF, QElapsedTimer, QUrl, QPoint
 from PyQt6.QtWidgets import QApplication, QWidget, QInputDialog, QLineEdit
 from PyQt6.QtMultimedia import QSoundEffect, QMediaPlayer, QAudioOutput
 
@@ -16,6 +17,30 @@ TRAFFIC_CAR_SPEED_MIN = 5
 TRAFFIC_CAR_SPEED_MAX = 20
 NUM_LANES = 4
 HIGHSCORES_FILE = "highscores.json"
+
+# Цветовая палитра
+DARK_GRAY = QColor(40, 40, 45)
+MEDIUM_GRAY = QColor(60, 60, 65)
+LIGHT_GRAY = QColor(80, 80, 85)
+ACCENT_COLOR = QColor(100, 150, 200)
+TEXT_COLOR = QColor(220, 220, 220)
+HIGHLIGHT_COLOR = QColor(120, 180, 240)
+
+# Стиль кнопок
+BUTTON_COLOR = QColor(30, 30, 30, 220)
+BUTTON_HOVER = QColor(50, 50, 50, 220)
+BUTTON_PRESSED = QColor(20, 20, 20, 220)
+BUTTON_TEXT = QColor(230, 230, 230)
+BUTTON_BORDER = QColor(80, 80, 80, 150)
+BUTTON_RADIUS = 12
+
+# Стиль ползунков
+SLIDER_HEIGHT = 14
+SLIDER_HANDLE_SIZE = 24
+SLIDER_COLOR = QColor(70, 70, 70)
+SLIDER_FILL = QColor(150, 150, 150)
+SLIDER_HANDLE_COLOR = QColor(200, 200, 200)
+SLIDER_RADIUS = 7
 
 # Состояния игры
 class GameState:
@@ -32,7 +57,7 @@ class GameState:
 class PlayerCar:
     def __init__(self):
         self.width = 60
-        self.height = 96
+        self.height = 98
         self.x = (SCREEN_WIDTH / 2) - (self.width / 2)
         self.y = SCREEN_HEIGHT - self.height - 20
         self.speed = 0
@@ -84,11 +109,13 @@ class GameWidget(QWidget):
     def __init__(self):
         super().__init__()
         self.setFixedSize(SCREEN_WIDTH, SCREEN_HEIGHT)
-        self.setWindowTitle("Traffic Racer Qt6")
+        self.setWindowTitle("Dark Racer")
         self.init_game()
         self.setup_timers()
         self.load_resources()
         self.highscores = self.load_highscores()
+        self.custom_font = QFont("Segoe UI", 12)
+        self.custom_font.setWeight(QFont.Weight.Medium)
 
     def init_game(self):
         self.game_state = GameState.MENU
@@ -141,23 +168,33 @@ class GameWidget(QWidget):
         self.background_music = QMediaPlayer()
         self.audio_output = QAudioOutput()
         self.background_music.setAudioOutput(self.audio_output)
-        music_path = "C:/reposit/Racer/racer/src/assets/sounds/music.mp3"
+        music_path = "src/assets/sounds/music.mp3"
         self.background_music.setSource(QUrl.fromLocalFile(music_path))
         self.audio_output.setVolume(self.music_volume / 100.0)
         
-        # Дорожное полотно
+        # Дорожное полотно и фон меню
         self.road_offset = 0
         self.road_speed_multiplier = 5
         self.road_image = QImage("src/assets/images/road.png")
         if self.road_image.isNull():
             print("Ошибка загрузки дорожного полотна")
             self.scaled_road_image = None
+            self.scaled_menu_bg = None
         else:
             self.scaled_road_image = self.road_image.scaled(
-                SCREEN_WIDTH, SCREEN_WIDTH,
-                Qt.AspectRatioMode.KeepAspectRatio,
+                SCREEN_WIDTH, SCREEN_HEIGHT,
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
                 Qt.TransformationMode.SmoothTransformation
             )
+            
+            # Создаем затемненную версию для фона меню
+            self.scaled_menu_bg = QImage(self.scaled_road_image)
+            darken = QImage(self.scaled_menu_bg.size(), QImage.Format.Format_ARGB32)
+            darken.fill(QColor(0, 0, 0, 160))
+            painter = QPainter(self.scaled_menu_bg)
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Darken)
+            painter.drawImage(0, 0, darken)
+            painter.end()
 
     def load_highscores(self):
         try:
@@ -200,6 +237,7 @@ class GameWidget(QWidget):
 
     def game_loop(self):
         delta_time = self.elapsed_timer.restart() / 1000.0
+        self.road_offset += 1  # Для анимации фона в меню
         if self.game_state == GameState.PLAYING:
             self.update_game_state(delta_time)
         self.update()
@@ -295,28 +333,252 @@ class GameWidget(QWidget):
             return random.uniform(base_min + (base_max - base_min) * 0.5, base_max + 2)
 
     def handle_game_over(self):
-        """Обработка окончания игры"""
         self.game_state = GameState.GAME_OVER
         self.spawn_traffic_timer.stop()
-        self.background_music.stop()  # Останавливаем музыку при окончании игры
+        self.background_music.stop()
     
         if self.check_highscore(self.score):
             QTimer.singleShot(100, self.show_highscore_dialog)
 
+    def show_highscore_dialog(self):
+        dialog = QInputDialog(self)
+        dialog.setWindowTitle('Новый рекорд!')
+        dialog.setLabelText(f'Ваш результат: {self.score}\nВведите ваше имя:')
+        dialog.setTextValue('')
+        dialog.setInputMode(QInputDialog.InputMode.TextInput)
+        
+        line_edit = dialog.findChild(QLineEdit)
+        if line_edit:
+            line_edit.setMaxLength(15)
+        
+        ok = dialog.exec()
+        name = dialog.textValue()
+        
+        if ok and name:
+            self.add_highscore(name, self.score)
+
+    def start_new_game(self):
+        self.game_state = GameState.PLAYING
+        self.reset_game()
+        self.spawn_traffic_timer.start(self.spawn_traffic_timer_interval)
+        self.background_music.setLoops(QMediaPlayer.Loops.Infinite)
+        self.background_music.play()
+
+    def reset_game(self):
+        self.score = 0
+        self.player_car = PlayerCar()
+        self.traffic_cars = []
+        self.road_offset = 0
+        self.elapsed_timer.restart()
+
+    def update_sound_volumes(self):
+        for sound in self.sound_effects.values():
+            sound.setVolume(self.sound_volume / 100.0)
+        
+        if hasattr(self, 'audio_output'):
+            self.audio_output.setVolume(self.music_volume / 100.0)
+
+    def play_sound(self, sound_name):
+        if sound_name in self.sound_effects:
+            self.sound_effects[sound_name].play()
+
+    def draw_common_background(self, painter, title=""):
+        if self.scaled_menu_bg and not self.scaled_menu_bg.isNull():
+            painter.drawImage(0, int(self.road_offset % SCREEN_HEIGHT), self.scaled_menu_bg)
+            painter.drawImage(0, int(self.road_offset % SCREEN_HEIGHT) - SCREEN_HEIGHT, self.scaled_menu_bg)
+        
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 160))
+        
+        if title:
+            painter.setFont(QFont("Segoe UI", 28, QFont.Weight.Bold))
+            painter.setPen(TEXT_COLOR)
+            painter.drawText(QRectF(0, 80, SCREEN_WIDTH, 60),
+                           Qt.AlignmentFlag.AlignCenter, title)
+            
+            painter.setPen(QPen(QColor(100, 100, 100, 150), 1))
+            painter.drawLine(SCREEN_WIDTH//4, 140, 3*SCREEN_WIDTH//4, 140)
+
+    def draw_button(self, painter, rect, text, color=None, hover=False, pressed=False):
+        if pressed:
+            btn_color = BUTTON_PRESSED
+        elif hover:
+            btn_color = BUTTON_HOVER
+        else:
+            btn_color = color if color else BUTTON_COLOR
+        
+        path = QPainterPath()
+        path.addRoundedRect(rect, BUTTON_RADIUS, BUTTON_RADIUS)
+        
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.fillPath(path, btn_color)
+        
+        painter.setPen(QPen(BUTTON_BORDER, 1.2))
+        painter.drawPath(path)
+        
+        painter.setPen(BUTTON_TEXT)
+        painter.setFont(QFont("Segoe UI", 13, QFont.Weight.Medium))
+        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
+        
+        return rect
+
+    def draw_button_block(self, painter, buttons, start_y=None):
+        button_width = 250
+        button_height = 50
+        spacing = 20
+        
+        if start_y is None:
+            start_y = SCREEN_HEIGHT // 2 - (len(buttons) * (button_height + spacing) - spacing) // 2
+        
+        button_rects = []
+        for i, (text, _) in enumerate(buttons):
+            rect = QRectF(SCREEN_WIDTH // 2 - button_width // 2,
+                         start_y + i * (button_height + spacing),
+                         button_width, button_height)
+            
+            mouse_pos = self.mapFromGlobal(QCursor.pos())
+            mouse_pos_f = QPointF(mouse_pos)  # Преобразуем QPoint в QPointF
+            hover = rect.contains(mouse_pos_f)
+            pressed = hover and QApplication.mouseButtons() == Qt.MouseButton.LeftButton
+            
+            button_rects.append(self.draw_button(painter, rect, text, None, hover, pressed))
+        
+        return button_rects
+
+    def draw_back_button(self, painter):
+        back_rect = QRectF(20, SCREEN_HEIGHT - 70, 100, 40)
+        mouse_pos = self.mapFromGlobal(QCursor.pos())
+        mouse_pos_f = QPointF(mouse_pos)  # Преобразуем QPoint в QPointF
+        hover = back_rect.contains(mouse_pos_f)
+        pressed = hover and QApplication.mouseButtons() == Qt.MouseButton.LeftButton
+        self.draw_button(painter, back_rect, "Назад", MEDIUM_GRAY, hover, pressed)
+        return back_rect
+
+    def draw_slider(self, painter, x, y, width, value):
+        bg_rect = QRectF(x, y, width, SLIDER_HEIGHT)
+        path = QPainterPath()
+        path.addRoundedRect(bg_rect, SLIDER_RADIUS, SLIDER_RADIUS)
+        painter.fillPath(path, SLIDER_COLOR)
+        
+        fill_width = max(SLIDER_HANDLE_SIZE/2, (width * (value / 100)))
+        fill_rect = QRectF(x, y, fill_width, SLIDER_HEIGHT)
+        fill_path = QPainterPath()
+        fill_path.addRoundedRect(fill_rect, SLIDER_RADIUS, SLIDER_RADIUS)
+        painter.fillPath(fill_path, SLIDER_FILL)
+        
+        handle_x = x + (width * (value / 100)) - (SLIDER_HANDLE_SIZE/2)
+        handle_rect = QRectF(handle_x, y - (SLIDER_HANDLE_SIZE-SLIDER_HEIGHT)/2, 
+                            SLIDER_HANDLE_SIZE, SLIDER_HANDLE_SIZE)
+        
+        gradient = QLinearGradient(handle_rect.topLeft(), handle_rect.bottomLeft())
+        gradient.setColorAt(0, SLIDER_HANDLE_COLOR)
+        gradient.setColorAt(1, QColor(170, 170, 170))
+        
+        painter.setPen(QPen(QColor(100, 100, 100), 1))
+        painter.setBrush(gradient)
+        painter.drawEllipse(handle_rect)
+
+    def draw_menu(self, painter):
+        self.draw_common_background(painter, "DARK RACER")
+        
+        buttons = [
+            ("СТАРТ", GameState.PLAYING),
+            ("РЕКОРДЫ", GameState.HIGHSCORES),
+            ("НАСТРОЙКИ", GameState.SETTINGS),
+            ("ВЫХОД", None)
+        ]
+        self.draw_button_block(painter, buttons, SCREEN_HEIGHT//2 - 100)
+
+    def draw_settings_menu(self, painter):
+        self.draw_common_background(painter, "НАСТРОЙКИ")
+        
+        buttons = [
+            ("АУДИО", GameState.AUDIO_SETTINGS),
+            ("СЛОЖНОСТЬ", GameState.DIFFICULTY_SETTINGS),
+            ("ГРАФИКА", GameState.GRAPHICS_SETTINGS),
+            ("УПРАВЛЕНИЕ", GameState.CONTROLS_SETTINGS)
+        ]
+        self.draw_button_block(painter, buttons)
+        self.draw_back_button(painter)
+
+    def draw_audio_settings(self, painter):
+        self.draw_common_background(painter, "НАСТРОЙКИ АУДИО")
+        
+        painter.setFont(QFont("Segoe UI", 16))
+        painter.setPen(TEXT_COLOR)
+        
+        painter.drawText(50, 170, "Громкость музыки:")
+        self.draw_slider(painter, 50, 190, SCREEN_WIDTH-100, self.music_volume)
+        
+        painter.drawText(50, 270, "Громкость звуков:")
+        self.draw_slider(painter, 50, 290, SCREEN_WIDTH-100, self.sound_volume)
+        
+        self.draw_back_button(painter)
+
+    def draw_difficulty_settings(self, painter):
+        self.draw_common_background(painter, "УРОВЕНЬ СЛОЖНОСТИ")
+        
+        difficulties = ["ЛЕГКИЙ", "СРЕДНИЙ", "СЛОЖНЫЙ"]
+        for i, diff in enumerate(difficulties):
+            color = HIGHLIGHT_COLOR if self.difficulty == i else MEDIUM_GRAY
+            rect = QRectF(SCREEN_WIDTH//2 - 120, 180 + i*90, 240, 60)
+            self.draw_button(painter, rect, diff, color)
+        
+        self.draw_back_button(painter)
+
+    def draw_graphics_settings(self, painter):
+        self.draw_common_background(painter, "КАЧЕСТВО ГРАФИКИ")
+        
+        qualities = ["НИЗКОЕ", "СРЕДНЕЕ", "ВЫСОКОЕ"]
+        for i, qual in enumerate(qualities):
+            color = HIGHLIGHT_COLOR if self.graphics_quality == i else MEDIUM_GRAY
+            rect = QRectF(SCREEN_WIDTH//2 - 120, 180 + i*90, 240, 60)
+            self.draw_button(painter, rect, qual, color)
+        
+        self.draw_back_button(painter)
+
+    def draw_controls_settings(self, painter):
+        self.draw_common_background(painter, "НАСТРОЙКИ УПРАВЛЕНИЯ")
+        
+        options = ["АВТОУСКОРЕНИЕ", "РУЧНОЕ УПРАВЛЕНИЕ"]
+        for i, opt in enumerate(options):
+            active = (i == 0 and self.auto_acceleration) or (i == 1 and not self.auto_acceleration)
+            color = HIGHLIGHT_COLOR if active else MEDIUM_GRAY
+            rect = QRectF(SCREEN_WIDTH//2 - 150, 180 + i*90, 300, 60)
+            self.draw_button(painter, rect, opt, color)
+        
+        self.draw_back_button(painter)
+
+    def draw_highscores(self, painter):
+        self.draw_common_background(painter, "ТАБЛИЦА РЕКОРДОВ")
+        
+        painter.setFont(QFont("Segoe UI", 20, QFont.Weight.Bold))
+        painter.setPen(TEXT_COLOR)
+        painter.drawText(150, 180, "ИГРОК")
+        painter.drawText(400, 180, "ОЧКИ")
+        
+        painter.setFont(QFont("Segoe UI", 16))
+        
+        for i, record in enumerate(self.highscores[:10]):
+            y_pos = 220 + i * 35
+            painter.drawText(150, y_pos, f"{i+1}. {record['name']}")
+            painter.drawText(400, y_pos, str(record['score']))
+        
+        self.draw_back_button(painter)
+
     def draw_game_over(self, painter):
         painter.fillRect(self.rect(), QColor(0, 0, 0, 180))
         
-        painter.setFont(QFont("Arial", 36, QFont.Weight.Bold))
+        painter.setFont(QFont("Segoe UI", 36, QFont.Weight.Bold))
         painter.setPen(Qt.GlobalColor.red)
         painter.drawText(QRectF(0, 150, SCREEN_WIDTH, 60),
                         Qt.AlignmentFlag.AlignCenter,
                         "АВАРИЯ!")
         
-        painter.setFont(QFont("Arial", 24))
-        painter.setPen(Qt.GlobalColor.white)
+        painter.setFont(QFont("Segoe UI", 24))
+        painter.setPen(TEXT_COLOR)
         painter.drawText(QRectF(0, 220, SCREEN_WIDTH, 40),
                         Qt.AlignmentFlag.AlignCenter,
-                        f"Ваш счет: {self.score}")
+                        f"ВАШ СЧЕТ: {self.score}")
 
         button_width = 200
         button_height = 50
@@ -328,7 +590,7 @@ class GameWidget(QWidget):
             button_width, 
             button_height
         )
-        self.draw_button(painter, restart_rect, "Играть снова")
+        self.draw_button(painter, restart_rect, "ИГРАТЬ СНОВА")
         
         menu_rect = QRectF(
             SCREEN_WIDTH // 2 + 10, 
@@ -336,7 +598,110 @@ class GameWidget(QWidget):
             button_width, 
             button_height
         )
-        self.draw_button(painter, menu_rect, "Главное меню")
+        self.draw_button(painter, menu_rect, "ГЛАВНОЕ МЕНЮ")
+
+    def draw_game(self, painter):
+        if self.scaled_road_image:
+            painter.drawImage(0, int(self.road_offset), self.scaled_road_image)
+            painter.drawImage(0, int(self.road_offset - SCREEN_HEIGHT), self.scaled_road_image)
+        else:
+            painter.fillRect(self.rect(), DARK_GRAY)
+        
+        self.player_car.draw(painter)
+        for car in self.traffic_cars:
+            car.draw(painter)
+        
+        painter.setFont(QFont("Segoe UI", 16))
+        painter.setPen(TEXT_COLOR)
+        painter.drawText(10, 30, f"СЧЕТ: {self.score}")
+        painter.drawText(10, 60, f"СКОРОСТЬ: {int(self.player_car.speed * 10)} КМ/Ч")
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setFont(self.custom_font)
+        
+        if self.game_state == GameState.MENU:
+            self.draw_menu(painter)
+        elif self.game_state == GameState.SETTINGS:
+            self.draw_settings_menu(painter)
+        elif self.game_state == GameState.AUDIO_SETTINGS:
+            self.draw_audio_settings(painter)
+        elif self.game_state == GameState.DIFFICULTY_SETTINGS:
+            self.draw_difficulty_settings(painter)
+        elif self.game_state == GameState.GRAPHICS_SETTINGS:
+            self.draw_graphics_settings(painter)
+        elif self.game_state == GameState.CONTROLS_SETTINGS:
+            self.draw_controls_settings(painter)
+        elif self.game_state == GameState.HIGHSCORES:
+            self.draw_highscores(painter)
+        elif self.game_state in (GameState.PLAYING, GameState.GAME_OVER):
+            self.draw_game(painter)
+            
+            if self.game_state == GameState.GAME_OVER:
+                self.draw_game_over(painter)
+
+    def keyPressEvent(self, event):
+        if self.game_state == GameState.PLAYING:
+            if event.key() == Qt.Key.Key_Left:
+                self.left_pressed = True
+            elif event.key() == Qt.Key.Key_Right:
+                self.right_pressed = True
+            elif event.key() == Qt.Key.Key_Up and not self.auto_acceleration:
+                self.up_pressed = True
+            elif event.key() == Qt.Key.Key_Down and not self.auto_acceleration:
+                self.down_pressed = True
+            elif event.key() == Qt.Key.Key_Space:
+                self.space_pressed = True
+                
+        elif self.game_state == GameState.GAME_OVER:
+            if event.key() == Qt.Key.Key_R:
+                self.start_new_game()
+            elif event.key() == Qt.Key.Key_M:
+                self.background_music.stop()
+                self.game_state = GameState.MENU
+                
+        elif self.game_state in (GameState.SETTINGS, GameState.AUDIO_SETTINGS, 
+                               GameState.DIFFICULTY_SETTINGS, GameState.GRAPHICS_SETTINGS,
+                               GameState.CONTROLS_SETTINGS, GameState.HIGHSCORES):
+            if event.key() in (Qt.Key.Key_M, Qt.Key.Key_Escape):
+                self.background_music.stop()
+                self.game_state = GameState.MENU
+
+    def keyReleaseEvent(self, event):
+        if self.game_state == GameState.PLAYING:
+            if event.key() == Qt.Key.Key_Left:
+                self.left_pressed = False
+            elif event.key() == Qt.Key.Key_Right:
+                self.right_pressed = False
+            elif event.key() == Qt.Key.Key_Up:
+                self.up_pressed = False
+            elif event.key() == Qt.Key.Key_Down:
+                self.down_pressed = False
+            elif event.key() == Qt.Key.Key_Space:
+                self.space_pressed = False
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            pos = event.pos()
+            pos_f = QPointF(pos)  # Преобразуем QPoint в QPointF
+            
+            if self.game_state == GameState.GAME_OVER:
+                self.handle_game_over_click(pos_f)
+            elif self.game_state == GameState.MENU:
+                self.handle_menu_click(pos_f)
+            elif self.game_state == GameState.SETTINGS:
+                self.handle_settings_click(pos_f)
+            elif self.game_state == GameState.AUDIO_SETTINGS:
+                self.handle_audio_settings_click(pos_f)
+            elif self.game_state == GameState.DIFFICULTY_SETTINGS:
+                self.handle_difficulty_settings_click(pos_f)
+            elif self.game_state == GameState.GRAPHICS_SETTINGS:
+                self.handle_graphics_settings_click(pos_f)
+            elif self.game_state == GameState.CONTROLS_SETTINGS:
+                self.handle_controls_settings_click(pos_f)
+            elif self.game_state == GameState.HIGHSCORES:
+                self.handle_highscores_click(pos_f)
 
     def handle_game_over_click(self, pos):
         button_width = 200
@@ -361,308 +726,28 @@ class GameWidget(QWidget):
         if menu_rect.contains(pos):
             self.game_state = GameState.MENU
 
-    def show_highscore_dialog(self):
-        dialog = QInputDialog(self)
-        dialog.setWindowTitle('Новый рекорд!')
-        dialog.setLabelText(f'Ваш результат: {self.score}\nВведите ваше имя:')
-        dialog.setTextValue('')
-        dialog.setInputMode(QInputDialog.InputMode.TextInput)
-        
-        line_edit = dialog.findChild(QLineEdit)
-        if line_edit:
-            line_edit.setMaxLength(15)
-        
-        ok = dialog.exec()
-        name = dialog.textValue()
-        
-        if ok and name:
-            self.add_highscore(name, self.score)
-
-    def start_new_game(self):
-        """Начало новой игры"""
-        self.game_state = GameState.PLAYING
-        self.reset_game()
-        self.spawn_traffic_timer.start(self.spawn_traffic_timer_interval)
-        # Воспроизведение фоновой музыки в цикле
-        self.background_music.setLoops(QMediaPlayer.Loops.Infinite)
-        self.background_music.play()
-
-    def reset_game(self):
-        self.score = 0
-        self.player_car = PlayerCar()
-        self.traffic_cars = []
-        self.road_offset = 0
-        self.elapsed_timer.restart()
-
-    def update_sound_volumes(self):
-        """Обновление громкости звуков и музыки"""
-        for sound in self.sound_effects.values():
-            sound.setVolume(self.sound_volume / 100.0)
-        
-        if hasattr(self, 'audio_output'):
-            self.audio_output.setVolume(self.music_volume / 100.0)
-
-    def play_sound(self, sound_name):
-        if sound_name in self.sound_effects:
-            self.sound_effects[sound_name].play()
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        if self.game_state == GameState.MENU:
-            self.draw_menu(painter)
-        elif self.game_state == GameState.SETTINGS:
-            self.draw_settings_menu(painter)
-        elif self.game_state == GameState.AUDIO_SETTINGS:
-            self.draw_audio_settings(painter)
-        elif self.game_state == GameState.DIFFICULTY_SETTINGS:
-            self.draw_difficulty_settings(painter)
-        elif self.game_state == GameState.GRAPHICS_SETTINGS:
-            self.draw_graphics_settings(painter)
-        elif self.game_state == GameState.CONTROLS_SETTINGS:
-            self.draw_controls_settings(painter)
-        elif self.game_state in (GameState.PLAYING, GameState.GAME_OVER):
-            self.draw_game(painter)
-            
-            if self.game_state == GameState.GAME_OVER:
-                self.draw_game_over(painter)
-        elif self.game_state == GameState.HIGHSCORES:
-            self.draw_highscores(painter)
-
-    def draw_game(self, painter):
-        if self.scaled_road_image:
-            painter.drawImage(0, int(self.road_offset), self.scaled_road_image)
-            painter.drawImage(0, int(self.road_offset - SCREEN_HEIGHT), self.scaled_road_image)
-        else:
-            painter.fillRect(self.rect(), QColor(50, 50, 50))
-        
-        self.player_car.draw(painter)
-        for car in self.traffic_cars:
-            car.draw(painter)
-        
-        painter.setFont(QFont("Arial", 16))
-        painter.setPen(Qt.GlobalColor.white)
-        painter.drawText(10, 30, f"Счет: {self.score}")
-        painter.drawText(10, 60, f"Скорость: {int(self.player_car.speed * 10)} км/ч")
-
-    def draw_highscores(self, painter):
-        self.draw_common_background(painter, "ТАБЛИЦА РЕКОРДОВ")
-        
-        painter.setFont(QFont("Arial", 20, QFont.Weight.Bold))
-        painter.setPen(QColor(220, 220, 220))
-        
-        painter.drawText(150, 180, "Игрок")
-        painter.drawText(400, 180, "Очки")
-        
-        painter.setFont(QFont("Arial", 16))
-        
-        for i, record in enumerate(self.highscores[:10]):
-            y_pos = 220 + i * 35
-            painter.drawText(150, y_pos, f"{i+1}. {record['name']}")
-            painter.drawText(400, y_pos, str(record['score']))
-        
-        self.draw_back_button(painter)
-
-    def draw_common_background(self, painter, title):
-        painter.fillRect(self.rect(), QColor(35, 35, 40))
-        
-        painter.setFont(QFont("Arial", 28, QFont.Weight.Bold))
-        painter.setPen(QColor(220, 220, 220))
-        painter.drawText(QRectF(0, 80, SCREEN_WIDTH, 60),
-                        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
-                        title)
-        
-        painter.setPen(QColor(70, 130, 180, 150))
-        painter.drawLine(SCREEN_WIDTH // 4, 140, 3 * SCREEN_WIDTH // 4, 140)
-
-    def draw_button(self, painter, rect, text, color=None):
-        button_color = color if color else QColor(70, 130, 180)
-        path = QPainterPath()
-        path.addRoundedRect(rect, 8, 8)
-        painter.fillPath(path, button_color)
-        
-        painter.setPen(Qt.GlobalColor.white)
-        painter.setFont(QFont("Arial", 12, QFont.Weight.Medium))
-        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
-        return rect
-
-    def draw_button_block(self, painter, buttons, start_y=None):
-        button_width = 220
-        button_height = 45
-        spacing = 15
-        
-        if start_y is None:
-            start_y = SCREEN_HEIGHT // 2 - (len(buttons) * (button_height + spacing) - spacing) // 2
-        
-        button_rects = []
-        for i, (text, _) in enumerate(buttons):
-            rect = QRectF(SCREEN_WIDTH // 2 - button_width // 2,
-                         start_y + i * (button_height + spacing),
-                         button_width, button_height)
-            button_rects.append(self.draw_button(painter, rect, text))
-        
-        return button_rects
-
-    def draw_back_button(self, painter):
-        back_rect = QRectF(20, SCREEN_HEIGHT - 60, 100, 35)
-        return self.draw_button(painter, back_rect, "Назад", QColor(100, 100, 100))
-
-    def draw_menu(self, painter):
-        self.draw_common_background(painter, "Traffic Racer Qt6")
-        buttons = [
-            ("Новая игра", GameState.PLAYING),
-            ("Таблица рекордов", GameState.HIGHSCORES),
-            ("Настройки", GameState.SETTINGS),
-            ("Выход", None)
-        ]
-        self.draw_button_block(painter, buttons)
-
-    def draw_settings_menu(self, painter):
-        self.draw_common_background(painter, "НАСТРОЙКИ")
-        buttons = [
-            ("Аудио", GameState.AUDIO_SETTINGS),
-            ("Сложность", GameState.DIFFICULTY_SETTINGS),
-            ("Графика", GameState.GRAPHICS_SETTINGS),
-            ("Управление", GameState.CONTROLS_SETTINGS)
-        ]
-        self.draw_button_block(painter, buttons)
-        self.draw_back_button(painter)
-
-    def draw_audio_settings(self, painter):
-        self.draw_common_background(painter, "НАСТРОЙКИ АУДИО")
-        
-        painter.setFont(QFont("Arial", 16))
-        painter.setPen(Qt.GlobalColor.white)
-        painter.drawText(50, 150, "Громкость музыки:")
-        self.draw_slider(painter, 50, 180, self.music_volume, QColor(0, 150, 0))
-        
-        painter.drawText(50, 250, "Громкость звуков:")
-        self.draw_slider(painter, 50, 280, self.sound_volume, QColor(0, 0, 150))
-        
-        self.draw_back_button(painter)
-
-    def draw_difficulty_settings(self, painter):
-        self.draw_common_background(painter, "УРОВЕНЬ СЛОЖНОСТИ")
-        
-        difficulties = ["Легкий", "Средний", "Сложный"]
-        for i, diff in enumerate(difficulties):
-            color = QColor(100, 200, 100) if self.difficulty == i else QColor(100, 100, 100)
-            rect = QRectF(SCREEN_WIDTH // 2 - 100, 150 + i * 80, 200, 60)
-            self.draw_button(painter, rect, diff, color)
-        
-        self.draw_back_button(painter)
-
-    def draw_graphics_settings(self, painter):
-        self.draw_common_background(painter, "КАЧЕСТВО ГРАФИКИ")
-        
-        qualities = ["Низкое", "Среднее", "Высокое"]
-        for i, qual in enumerate(qualities):
-            color = QColor(100, 200, 100) if self.graphics_quality == i else QColor(100, 100, 100)
-            rect = QRectF(SCREEN_WIDTH // 2 - 100, 150 + i * 80, 200, 60)
-            self.draw_button(painter, rect, qual, color)
-        
-        self.draw_back_button(painter)
-
-    def draw_controls_settings(self, painter):
-        self.draw_common_background(painter, "НАСТРОЙКИ УПРАВЛЕНИЯ")
-        
-        options = ["Автоускорение", "Ручное управление"]
-        for i, opt in enumerate(options):
-            active = (i == 0 and self.auto_acceleration) or (i == 1 and not self.auto_acceleration)
-            color = QColor(100, 200, 100) if active else QColor(100, 100, 100)
-            rect = QRectF(SCREEN_WIDTH // 2 - 125, 150 + i * 80, 250, 60)
-            self.draw_button(painter, rect, opt, color)
-        
-        self.draw_back_button(painter)
-
-    def draw_slider(self, painter, x, y, value, color):
-        width = SCREEN_WIDTH - 100
-        height = 20
-    
-        painter.fillRect(QRectF(x, y, width, height), QColor(100, 100, 100))
-    
-        filled_width = int(width * (value / 100))
-        painter.fillRect(QRectF(x, y, filled_width, height), color)
-
-    def keyPressEvent(self, event):
-        if self.game_state == GameState.PLAYING:
-            if event.key() == Qt.Key.Key_Left:
-                self.left_pressed = True
-            elif event.key() == Qt.Key.Key_Right:
-                self.right_pressed = True
-            elif event.key() == Qt.Key.Key_Up and not self.auto_acceleration:
-                self.up_pressed = True
-            elif event.key() == Qt.Key.Key_Down and not self.auto_acceleration:
-                self.down_pressed = True
-            elif event.key() == Qt.Key.Key_Space:
-                self.space_pressed = True
-                
-        elif self.game_state == GameState.GAME_OVER:
-            if event.key() == Qt.Key.Key_R:
-                self.start_new_game()
-            elif event.key() == Qt.Key.Key_M:
-                self.background_music.stop()  # Останавливаем музыку при возврате в меню
-                self.game_state = GameState.MENU
-                
-        elif self.game_state in (GameState.SETTINGS, GameState.AUDIO_SETTINGS, 
-                               GameState.DIFFICULTY_SETTINGS, GameState.GRAPHICS_SETTINGS,
-                               GameState.CONTROLS_SETTINGS, GameState.HIGHSCORES):
-            if event.key() in (Qt.Key.Key_M, Qt.Key.Key_Escape):
-                self.background_music.stop()  # Останавливаем музыку при возврате в меню
-                self.game_state = GameState.MENU
-
-    def keyReleaseEvent(self, event):
-        if self.game_state == GameState.PLAYING:
-            if event.key() == Qt.Key.Key_Left:
-                self.left_pressed = False
-            elif event.key() == Qt.Key.Key_Right:
-                self.right_pressed = False
-            elif event.key() == Qt.Key.Key_Up:
-                self.up_pressed = False
-            elif event.key() == Qt.Key.Key_Down:
-                self.down_pressed = False
-            elif event.key() == Qt.Key.Key_Space:
-                self.space_pressed = False
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            pos = QPointF(event.pos())
-            
-            if self.game_state == GameState.GAME_OVER:
-                self.handle_game_over_click(pos)
-            elif self.game_state == GameState.MENU:
-                self.handle_menu_click(pos)
-            elif self.game_state == GameState.SETTINGS:
-                self.handle_settings_click(pos)
-            elif self.game_state == GameState.AUDIO_SETTINGS:
-                self.handle_audio_settings_click(pos)
-            elif self.game_state == GameState.DIFFICULTY_SETTINGS:
-                self.handle_difficulty_settings_click(pos)
-            elif self.game_state == GameState.GRAPHICS_SETTINGS:
-                self.handle_graphics_settings_click(pos)
-            elif self.game_state == GameState.CONTROLS_SETTINGS:
-                self.handle_controls_settings_click(pos)
-            elif self.game_state == GameState.HIGHSCORES:
-                self.handle_highscores_click(pos)
-
     def handle_menu_click(self, pos):
-        button_width = 220
-        button_height = 45
-        spacing = 15
-        start_y = SCREEN_HEIGHT // 2 - (4 * (button_height + spacing) - spacing) // 2
+        button_width = 250
+        button_height = 50
+        spacing = 20
+        start_y = SCREEN_HEIGHT // 2 - 100
         
-        new_game_rect = QRectF(SCREEN_WIDTH // 2 - button_width // 2, start_y, 
-                              button_width, button_height)
+        new_game_rect = QRectF(SCREEN_WIDTH // 2 - button_width // 2, 
+                              start_y, 
+                              button_width, 
+                              button_height)
         highscores_rect = QRectF(SCREEN_WIDTH // 2 - button_width // 2, 
                                 start_y + button_height + spacing, 
-                                button_width, button_height)
+                                button_width, 
+                                button_height)
         settings_rect = QRectF(SCREEN_WIDTH // 2 - button_width // 2, 
-                              start_y + 2 * (button_height + spacing), 
-                              button_width, button_height)
+                              start_y + 2*(button_height + spacing), 
+                              button_width, 
+                              button_height)
         exit_rect = QRectF(SCREEN_WIDTH // 2 - button_width // 2, 
-                          start_y + 3 * (button_height + spacing), 
-                          button_width, button_height)
+                          start_y + 3*(button_height + spacing), 
+                          button_width, 
+                          button_height)
         
         if new_game_rect.contains(pos):
             self.start_new_game()
@@ -674,23 +759,28 @@ class GameWidget(QWidget):
             QApplication.instance().quit()
 
     def handle_settings_click(self, pos):
-        button_width = 220
-        button_height = 45
-        spacing = 15
-        start_y = SCREEN_HEIGHT // 2 - (4 * (button_height + spacing) - spacing) // 2
+        button_width = 250
+        button_height = 50
+        spacing = 20
+        start_y = SCREEN_HEIGHT // 2 - 150
         
-        audio_rect = QRectF(SCREEN_WIDTH // 2 - button_width // 2, start_y, 
-                           button_width, button_height)
+        audio_rect = QRectF(SCREEN_WIDTH // 2 - button_width // 2, 
+                           start_y, 
+                           button_width, 
+                           button_height)
         difficulty_rect = QRectF(SCREEN_WIDTH // 2 - button_width // 2, 
-                                start_y + button_height + spacing, 
-                                button_width, button_height)
+                               start_y + button_height + spacing, 
+                               button_width, 
+                               button_height)
         graphics_rect = QRectF(SCREEN_WIDTH // 2 - button_width // 2, 
-                              start_y + 2 * (button_height + spacing), 
-                              button_width, button_height)
+                             start_y + 2*(button_height + spacing), 
+                             button_width, 
+                             button_height)
         controls_rect = QRectF(SCREEN_WIDTH // 2 - button_width // 2, 
-                              start_y + 3 * (button_height + spacing), 
-                              button_width, button_height)
-        back_rect = QRectF(20, SCREEN_HEIGHT - 70, 150, 45)
+                             start_y + 3*(button_height + spacing), 
+                             button_width, 
+                             button_height)
+        back_rect = QRectF(20, SCREEN_HEIGHT - 70, 100, 40)
         
         if audio_rect.contains(pos):
             self.game_state = GameState.AUDIO_SETTINGS
@@ -704,51 +794,62 @@ class GameWidget(QWidget):
             self.game_state = GameState.MENU
 
     def handle_audio_settings_click(self, pos):
-        if 50 <= pos.x() <= SCREEN_WIDTH - 50 and 180 <= pos.y() <= 200:
-            self.music_volume = int((pos.x() - 50) / (SCREEN_WIDTH - 100) * 100)
+        # Ползунок музыки
+        if 50 <= pos.x() <= SCREEN_WIDTH-50 and 190 <= pos.y() <= 190+SLIDER_HEIGHT:
+            self.music_volume = int(((pos.x()-50) / (SCREEN_WIDTH-100)) * 100)
             self.music_volume = max(0, min(100, self.music_volume))
-            
-        elif 50 <= pos.x() <= SCREEN_WIDTH - 50 and 280 <= pos.y() <= 300:
-            self.sound_volume = int((pos.x() - 50) / (SCREEN_WIDTH - 100) * 100)
+            self.audio_output.setVolume(self.music_volume / 100.0)
+        
+        # Ползунок звуков
+        elif 50 <= pos.x() <= SCREEN_WIDTH-50 and 290 <= pos.y() <= 290+SLIDER_HEIGHT:
+            self.sound_volume = int(((pos.x()-50) / (SCREEN_WIDTH-100)) * 100)
             self.sound_volume = max(0, min(100, self.sound_volume))
             self.update_sound_volumes()
             
-        elif QRectF(20, SCREEN_HEIGHT - 70, 150, 45).contains(pos):
+        # Кнопка "Назад"
+        elif QRectF(20, SCREEN_HEIGHT-70, 100, 40).contains(pos):
             self.game_state = GameState.SETTINGS
 
     def handle_difficulty_settings_click(self, pos):
         for i in range(3):
-            rect = QRectF(SCREEN_WIDTH // 2 - 100, 150 + i * 80, 200, 60)
+            rect = QRectF(SCREEN_WIDTH//2 - 120, 180 + i*90, 240, 60)
             if rect.contains(pos):
                 self.difficulty = i
                 break
                 
-        if QRectF(20, SCREEN_HEIGHT - 70, 150, 45).contains(pos):
+        if QRectF(20, SCREEN_HEIGHT-70, 100, 40).contains(pos):
             self.game_state = GameState.SETTINGS
 
     def handle_graphics_settings_click(self, pos):
         for i in range(3):
-            rect = QRectF(SCREEN_WIDTH // 2 - 100, 150 + i * 80, 200, 60)
+            rect = QRectF(SCREEN_WIDTH//2 - 120, 180 + i*90, 240, 60)
             if rect.contains(pos):
                 self.graphics_quality = i
                 break
                 
-        if QRectF(20, SCREEN_HEIGHT - 70, 150, 45).contains(pos):
+        if QRectF(20, SCREEN_HEIGHT-70, 100, 40).contains(pos):
             self.game_state = GameState.SETTINGS
 
     def handle_controls_settings_click(self, pos):
         for i in range(2):
-            rect = QRectF(SCREEN_WIDTH // 2 - 125, 150 + i * 80, 250, 60)
+            rect = QRectF(SCREEN_WIDTH//2 - 150, 180 + i*90, 300, 60)
             if rect.contains(pos):
                 self.auto_acceleration = (i == 0)
                 break
                 
-        if QRectF(20, SCREEN_HEIGHT - 70, 150, 45).contains(pos):
+        if QRectF(20, SCREEN_HEIGHT-70, 100, 40).contains(pos):
             self.game_state = GameState.SETTINGS
 
     def handle_highscores_click(self, pos):
-        if QRectF(20, SCREEN_HEIGHT - 70, 150, 45).contains(pos):
+        if QRectF(20, SCREEN_HEIGHT-70, 100, 40).contains(pos):
             self.game_state = GameState.MENU
+
+    def mouseMoveEvent(self, event):
+        if self.game_state in [GameState.MENU, GameState.SETTINGS, 
+                             GameState.AUDIO_SETTINGS, GameState.DIFFICULTY_SETTINGS,
+                             GameState.GRAPHICS_SETTINGS, GameState.CONTROLS_SETTINGS,
+                             GameState.HIGHSCORES]:
+            self.update()  # Для обновления hover-эффектов
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
